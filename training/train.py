@@ -21,7 +21,7 @@ if __name__ == "__main__":
     wandb.init(
         project="multilingual-sae-project",
         name=f"layer-{cfg.training.target_layer_name}-exp-{cfg.model.expansion_factor}",
-        config=cfg.__dict__ if hasattr(cfg, "__dict__") else cfg,
+        config=cfg.model_dump(),
     )
     target_layer_name = cfg.training.target_layer_name
 

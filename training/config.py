@@ -1,6 +1,6 @@
 import yaml
-from pathlib import Path
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class ModelConfig(BaseModel):
@@ -31,11 +31,3 @@ class MainConfig(BaseModel):
         with open(path, "r") as f:
             data = yaml.safe_load(f)
         return cls(**data)
-
-
-# Usage
-if __name__ == "__main__":
-    try:
-        cfg = MainConfig.load()
-    except Exception as e:
-        print(f"Config Validation Error: \n{e}")
