@@ -33,6 +33,7 @@ analyse:
     
   code_switch:
     dataset_path: "./data/forced_code_switch.jsonl"
-    target_languages: ["en", "fr", "es", "zh"] # Add or remove as needed
+    target_languages: ["fr", "es", "ko"] # Add or remove as needed
+    or_language: "es"
     batch_size: 32
 

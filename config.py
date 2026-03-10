@@ -41,6 +41,7 @@ class ExtractConfig(BaseModel):
 class CodeSwitchConfig(BaseModel):
     dataset_path: str
     target_languages: list[str] = ["en", "es", "fr", "ja", "ko", "pt", "th", "vi", "zh", "ar"]
+    or_language: str = "es"
     batch_size: int = 32
 
 

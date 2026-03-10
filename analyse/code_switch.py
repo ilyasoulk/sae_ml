@@ -27,6 +27,7 @@ def code_switch_experiment():
     cfg = MainConfig.load("config.yaml").analyse
     device = cfg.device
     target_languages = cfg.code_switch.target_languages
+    ori_lan = cfg.code_switch.or_language
 
     with open("top_features.json", "r", encoding="utf-8") as f:
         top_features = json.load(f)
@@ -38,7 +39,7 @@ def code_switch_experiment():
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        cfg.llm_path, device_map=device, torch_dtype=torch.bfloat16
+        cfg.llm_path, device_map=device, dtype=torch.bfloat16
     )
     model.eval()
 
@@ -46,7 +47,7 @@ def code_switch_experiment():
     dataloaders = {}
     datasets = {}
     for lan in target_languages:
-        dataset = CodeSwitchDataset(cfg.code_switch.dataset_path, lan)
+        dataset = CodeSwitchDataset(cfg.code_switch.dataset_path, target_lan=lan, ori_lan=ori_lan)
         datasets[lan] = dataset
         dataloaders[lan] = DataLoader(
             dataset,
@@ -72,7 +73,6 @@ def code_switch_experiment():
             if len(datasets[lan]) == 0:
                 continue
 
-            prefix_code = datasets[lan][0].get("ori_lan", "en")
 
             if layer_key not in top_features or lan not in top_features[layer_key]:
                 print(
@@ -83,7 +83,7 @@ def code_switch_experiment():
                 results_isolated_noun[lan].append(0.0)
                 continue
 
-            prefix_feature_idx = top_features[layer_key][prefix_code][0]
+            prefix_feature_idx = top_features[layer_key][ori_lan][0]["feature_idx"]
 
             layer_full_acts = []
             layer_isolated_acts = []

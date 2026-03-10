@@ -42,12 +42,12 @@ def build_language_dataloaders(jsonl_path, tokenizer, batch_size=32, max_length=
 
 
 class CodeSwitchDataset(Dataset):
-    def __init__(self, jsonl_path, target_lan):
+    def __init__(self, jsonl_path, ori_lan, target_lan):
         self.data = []
         with open(jsonl_path, "r") as f:
             for line in f:
                 item = json.loads(line)
-                if item["target_lan"] == target_lan:
+                if item.get("ori_lan") == ori_lan and item.get("target_lan") == target_lan:
                     self.data.append(item)
 
     def __len__(self):
