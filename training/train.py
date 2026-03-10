@@ -1,5 +1,7 @@
 import torch
 import wandb
+from tqdm import tqdm
+from pathlib import Path
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -31,7 +33,7 @@ if __name__ == "__main__":
 
     device = torch.device(cfg.training.device)
     llm = AutoModelForCausalLM.from_pretrained(
-        cfg.training.llm_path, torch_dtype=torch.bfloat16
+        cfg.training.llm_path, dtype=torch.bfloat16, attn_implementation="sdpa"
     ).to(device)
     llm.eval()
 
@@ -43,6 +45,9 @@ if __name__ == "__main__":
         cfg.training.batch_size,
         shuffle=True,
         collate_fn=get_collate_fn(tokenizer, max_length=cfg.training.max_length),
+        num_workers=4,
+        pin_memory=True,
+        prefetch_factor=2
     )
 
     d_model = llm.config.hidden_size
@@ -55,15 +60,17 @@ if __name__ == "__main__":
     target_layer = module_dict[target_layer_name]
     catcher = HookedActivations(target_layer)
     sae = SAE(d_model=d_model, expansion_factor=cfg.model.expansion_factor).to(device)
+    sae = torch.compile(sae)
 
-    optimizer = torch.optim.Adam(sae.parameters(), lr=cfg.training.lr)
+    optimizer = torch.optim.Adam(sae.parameters(), lr=cfg.training.lr, fused=True)
 
     buffer = ActivationBuffer(d_model, max_size=cfg.training.max_size, device=device)
 
     global_step = 0
 
     for epoch in range(1, cfg.training.num_epochs + 1):
-        for batch in train_loader:
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg.training.num_epochs}")
+        for batch in pbar:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
 
@@ -78,7 +85,7 @@ if __name__ == "__main__":
             if buffer.is_full:
                 sae.train()
                 for sae_batch in buffer.drain(batch_size=4096):
-                    optimizer.zero_grad()
+                    optimizer.zero_grad(set_to_none=True)
                     reconstructed_acts, features = sae(sae_batch)
 
                     loss = sae_loss(
@@ -121,5 +128,16 @@ if __name__ == "__main__":
                     )
 
                     global_step += 1
+                    pbar.set_postfix({
+                        "Loss": f"{loss.item():.4f}",
+                        "L0": f"{l0:.1f}",
+                        "FVE": f"{fve:.3f}"
+                    })
+    save_dir = Path("checkpoints") / str(wandb.run.name)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(sae.state_dict(), save_dir / "sae_weights.pt")
+    with open(save_dir / "config.json", "w") as f:
+        f.write(cfg.model_dump_json(indent=4))
 
+    print(f"Model and config saved to {save_dir}")
     wandb.finish()
