@@ -4,13 +4,15 @@ from tqdm import tqdm
 from pathlib import Path
 from datasets import load_dataset
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, get_constant_schedule_with_warmup
 
 
 from sae import SAE
 from loss import sae_loss
 from config import MainConfig
 from utils import SAEDataset, get_collate_fn, ActivationBuffer, HookedActivations
+
+torch.set_float32_matmul_precision('high')
 
 if __name__ == "__main__":
     try:
@@ -42,7 +44,7 @@ if __name__ == "__main__":
     print("Creating dataloaders...")
     train_loader = DataLoader(
         train_dataset,
-        cfg.training.batch_size,
+        cfg.training.llm_batch_size,
         shuffle=True,
         collate_fn=get_collate_fn(tokenizer, max_length=cfg.training.max_length),
         num_workers=4,
@@ -62,7 +64,17 @@ if __name__ == "__main__":
     sae = SAE(d_model=d_model, expansion_factor=cfg.model.expansion_factor).to(device)
     sae = torch.compile(sae)
 
-    optimizer = torch.optim.Adam(sae.parameters(), lr=cfg.training.lr, fused=True)
+    optimizer = torch.optim.AdamW(
+        sae.parameters(), 
+        lr=cfg.training.lr, 
+        fused=True, 
+        weight_decay=cfg.training.weight_decay
+    )
+
+    scheduler = get_constant_schedule_with_warmup(
+        optimizer, 
+        num_warmup_steps=cfg.training.num_warmup_steps
+    )
 
     buffer = ActivationBuffer(d_model, max_size=cfg.training.max_size, device=device)
 
@@ -84,7 +96,7 @@ if __name__ == "__main__":
 
             if buffer.is_full:
                 sae.train()
-                for sae_batch in buffer.drain(batch_size=4096):
+                for sae_batch in buffer.drain(batch_size=cfg.training.sae_batch_size):
                     optimizer.zero_grad(set_to_none=True)
                     reconstructed_acts, features = sae(sae_batch)
 
@@ -98,6 +110,7 @@ if __name__ == "__main__":
 
                     loss.backward()
                     optimizer.step()
+                    scheduler.step()
 
                     if cfg.model.loss_type == "l1":
                         sae.normalize_decoder_weights()
@@ -122,6 +135,7 @@ if __name__ == "__main__":
                             "train/l0_sparsity": l0,
                             "train/fve": fve,
                             "train/mse": mse,
+                            "train/lr": scheduler.get_last_lr()[0],
                             "epoch": epoch,
                         },
                         step=global_step,

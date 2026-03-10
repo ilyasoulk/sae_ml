@@ -12,7 +12,17 @@ class SAEDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.data[idx]
-        return item["text"]
+        if "text" in item:
+            return item["text"]
+            
+        # hardcoded Aya Dataset Logic
+        if "inputs" in item and "targets" in item:
+            return item["inputs"] + "\n" + item["targets"]
+            
+        raise ValueError(
+            f"Dataset item at index {idx} does not contain known text columns. "
+            f"Available keys found: {list(item.keys())}"
+        )
 
 
 def get_collate_fn(tokenizer, max_length=128):

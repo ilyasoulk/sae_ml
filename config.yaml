@@ -1,16 +1,19 @@
 model:
   expansion_factor: 16
-  l1_coeff: 0.00005
+  l1_coeff: 5
   loss_type: "l1"
 
 training:
-  batch_size: 128
+  llm_batch_size: 32
+  sae_batch_size: 4096
   lr: 0.0003
-  max_length: 64
+  weight_decay: 0.01
+  num_warmup_steps: 1000
+  max_length: 512
   num_epochs: 1
-  dataset_path: "roneneldan/TinyStories"
-  num_tokens: 1000000 
+  dataset_path: "CohereForAI/aya_dataset"
   device: "cuda"
-  llm_path: "Qwen/Qwen2.5-0.5B"
-  target_layer_name: "model.layers.12"
-  max_size: 16384
+  
+  llm_path: "Qwen/Qwen2.5-1.5B" 
+  target_layer_name: "model.layers.20" 
+  max_size: 500000

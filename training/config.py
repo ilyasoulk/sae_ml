@@ -5,17 +5,19 @@ from typing import Literal
 
 class ModelConfig(BaseModel):
     expansion_factor: int = Field(gt=0)
-    l1_coeff: float = Field(gt=0, lt=1)
+    l1_coeff: float = Field(gt=0, lt=10)
     loss_type: Literal["l1", "topk"] = "l1"
 
 
 class TrainConfig(BaseModel):
-    batch_size: int = 4096
+    llm_batch_size: int = 16 
+    sae_batch_size: int = 4096
     lr: float = 3e-4
     max_length: int = 256
     num_epochs: int = 1
+    weight_decay: float = 1e-2
+    num_warmup_steps: int = 1000
     dataset_path: str
-    num_tokens: int
     device: str
     llm_path: str
     target_layer_name: str
