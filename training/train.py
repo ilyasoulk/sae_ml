@@ -4,55 +4,60 @@ from tqdm import tqdm
 from pathlib import Path
 from datasets import load_dataset
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer, get_constant_schedule_with_warmup
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    get_constant_schedule_with_warmup,
+)
 
-
-from sae import SAE
-from loss import sae_loss
 from config import MainConfig
-from utils import SAEDataset, get_collate_fn, ActivationBuffer, HookedActivations
 
-torch.set_float32_matmul_precision('high')
+from training.sae import SAE
+from training.loss import sae_loss
+from training.utils import SAEDataset, get_collate_fn, ActivationBuffer, HookedActivations
+
+torch.set_float32_matmul_precision("high")
 
 if __name__ == "__main__":
     try:
-        cfg = MainConfig.load()
+        cfg = MainConfig.load().training
         print(f"Loaded config :\n{cfg}")
     except Exception as e:
         print(f"Config Validation Error: \n{e}")
         exit(1)
 
+    target_layer_name = cfg.target_layer_name
     wandb.init(
         project="multilingual-sae-project",
-        name=f"layer-{cfg.training.target_layer_name}-exp-{cfg.model.expansion_factor}",
+        name=f"layer-{target_layer_name}-exp-{cfg.model.expansion_factor}",
         config=cfg.model_dump(),
     )
-    target_layer_name = cfg.training.target_layer_name
 
-    print(f"Loading dataset : {cfg.training.dataset_path}")
-    dataset = load_dataset(cfg.training.dataset_path)
+    print(f"Loading dataset : {cfg.dataset_path}")
+    dataset = load_dataset(cfg.dataset_path)
     train_dataset = SAEDataset(dataset["train"])
 
-    device = torch.device(cfg.training.device)
+    device = torch.device(cfg.device)
     llm = AutoModelForCausalLM.from_pretrained(
-        cfg.training.llm_path, dtype=torch.bfloat16, attn_implementation="sdpa"
+        cfg.llm_path, dtype=torch.bfloat16, attn_implementation="sdpa"
     ).to(device)
     llm.eval()
 
-    tokenizer = AutoTokenizer.from_pretrained(cfg.training.llm_path)
+    tokenizer = AutoTokenizer.from_pretrained(cfg.llm_path)
 
     print("Creating dataloaders...")
     train_loader = DataLoader(
         train_dataset,
-        cfg.training.llm_batch_size,
+        cfg.optim.llm_batch_size,
         shuffle=True,
-        collate_fn=get_collate_fn(tokenizer, max_length=cfg.training.max_length),
+        collate_fn=get_collate_fn(tokenizer, max_length=cfg.optim.max_length),
         num_workers=4,
         pin_memory=True,
-        prefetch_factor=2
+        prefetch_factor=2,
     )
 
     d_model = llm.config.hidden_size
+    print(f"LLM has hidden_size = {d_model}")
     module_dict = dict(llm.named_modules())
 
     if target_layer_name not in module_dict:
@@ -65,23 +70,22 @@ if __name__ == "__main__":
     sae = torch.compile(sae)
 
     optimizer = torch.optim.AdamW(
-        sae.parameters(), 
-        lr=cfg.training.lr, 
-        fused=True, 
-        weight_decay=cfg.training.weight_decay
+        sae.parameters(),
+        lr=cfg.optim.lr,
+        fused=True,
+        weight_decay=cfg.optim.weight_decay,
     )
 
     scheduler = get_constant_schedule_with_warmup(
-        optimizer, 
-        num_warmup_steps=cfg.training.num_warmup_steps
+        optimizer, num_warmup_steps=cfg.optim.num_warmup_steps
     )
 
-    buffer = ActivationBuffer(d_model, max_size=cfg.training.max_size, device=device)
+    buffer = ActivationBuffer(d_model, max_size=cfg.optim.max_size, device=device)
 
     global_step = 0
 
-    for epoch in range(1, cfg.training.num_epochs + 1):
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg.training.num_epochs}")
+    for epoch in range(1, cfg.optim.num_epochs + 1):
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg.optim.num_epochs}")
         for batch in pbar:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
@@ -96,7 +100,7 @@ if __name__ == "__main__":
 
             if buffer.is_full:
                 sae.train()
-                for sae_batch in buffer.drain(batch_size=cfg.training.sae_batch_size):
+                for sae_batch in buffer.drain(batch_size=cfg.optim.sae_batch_size):
                     optimizer.zero_grad(set_to_none=True)
                     reconstructed_acts, features = sae(sae_batch)
 
@@ -145,7 +149,7 @@ if __name__ == "__main__":
                     pbar.set_postfix({
                         "Loss": f"{loss.item():.4f}",
                         "L0": f"{l0:.1f}",
-                        "FVE": f"{fve:.3f}"
+                        "FVE": f"{fve:.3f}",
                     })
     save_dir = Path("checkpoints") / str(wandb.run.name)
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -155,3 +159,4 @@ if __name__ == "__main__":
 
     print(f"Model and config saved to {save_dir}")
     wandb.finish()
+

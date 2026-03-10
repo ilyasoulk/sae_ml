@@ -1,19 +1,38 @@
-model:
-  expansion_factor: 16
-  l1_coeff: 5
-  loss_type: "l1"
-
 training:
-  llm_batch_size: 32
-  sae_batch_size: 4096
-  lr: 0.0003
-  weight_decay: 0.01
-  num_warmup_steps: 1000
-  max_length: 512
-  num_epochs: 1
+  llm_path: "Qwen/Qwen2.5-1.5B" 
   dataset_path: "CohereForAI/aya_dataset"
+  target_layer_name: "model.layers.20" 
+  device: "cuda"
+
+  model:
+    expansion_factor: 16
+    l1_coeff: 5
+    loss_type: "l1"
+
+  optim:
+    llm_batch_size: 32
+    sae_batch_size: 4096
+    lr: 0.0003
+    weight_decay: 0.01
+    num_warmup_steps: 1000
+    max_length: 512
+    num_epochs: 1
+    max_size: 500000
+
+analyse:
+  llm_path: "google/gemma-2-2b"
+  sae_repo_id: "google/gemma-scope-2b-pt-res"
+  num_layers: 26
   device: "cuda"
   
-  llm_path: "Qwen/Qwen2.5-1.5B" 
-  target_layer_name: "model.layers.20" 
-  max_size: 500000
+  extract:
+    dataset_path: "./data/multilingual_data_test.jsonl"
+    top_k: 5
+    batch_size: 32
+    max_length: 128
+    
+  code_switch:
+    dataset_path: "./data/forced_code_switch.jsonl"
+    target_languages: ["en", "fr", "es", "zh"] # Add or remove as needed
+    batch_size: 32
+
