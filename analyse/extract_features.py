@@ -61,11 +61,14 @@ def extract_features():
                     input_ids = batch["input_ids"].to(device)
                     attention_mask = batch["attention_mask"].to(device)
 
+                    feature_mask = attention_mask.clone().bool()
+                    feature_mask[:, 0] = False
+
                     model(input_ids, attention_mask=attention_mask, use_cache=False)
                     acts = model.current_sae_acts
 
                     acts_flat = acts.view(-1, d_sae)
-                    mask_flat = attention_mask.view(-1).bool()
+                    mask_flat = feature_mask.view(-1)
                     valid_acts = acts_flat[mask_flat]
 
                     sum_acts[lan] += valid_acts.sum(dim=0)
@@ -75,19 +78,43 @@ def extract_features():
         del sae
         torch.cuda.empty_cache()
 
-        s_total = torch.stack(list(sum_acts.values())).sum(dim=0)
-        n_total = sum(token_counts.values())
 
+        avg_acts_list = []
         for lan in languages:
             mu_l = sum_acts[lan] / max(token_counts[lan], 1)
+            avg_acts_list.append(mu_l)
+            
+        all_avg_acts = torch.stack(avg_acts_list) # Shape: [num_languages, d_sae]
 
-            s_other = s_total - sum_acts[lan]
-            n_other = n_total - token_counts[lan]
-            mu_other = s_other / max(n_other, 1)
 
+        for idx, lan in enumerate(languages):
+            mu_l = all_avg_acts[idx]
+            other_acts = torch.cat([all_avg_acts[:idx], all_avg_acts[idx+1:]], dim=0)
+            mu_other = other_acts.mean(dim=0) 
             score = mu_l - mu_other
-            top_k_indices = torch.topk(score, k=cfg.extract.top_k).indices.tolist()
-            top_features_dict[f"layer_{layer}"][lan] = top_k_indices
+            
+            # Get BOTH the indices and the actual score values
+            top_k_scores, top_k_indices = torch.topk(score, k=cfg.extract.top_k)
+            
+            indices = top_k_indices.tolist()
+            scores = top_k_scores.tolist()
+            
+            # Extract the raw u and v values for these specific features
+            u_values = mu_l[top_k_indices].tolist()
+            v_values = mu_other[top_k_indices].tolist()
+            
+            feature_details = []
+            for i in range(len(indices)):
+                feature_details.append({
+                    "feature_idx": indices[i],
+                    "u_target": round(u_values[i], 4),
+                    "v_other": round(v_values[i], 4),
+                    "score": round(scores[i], 4)
+                })
+                
+            top_features_dict[f"layer_{layer}"][lan] = feature_details
+
+
 
     with open("top_features.json", "w", encoding="utf-8") as f:
         json.dump(top_features_dict, f, indent=4)
