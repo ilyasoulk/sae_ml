@@ -1,0 +1,8 @@
+model:
+  dict_size: 32768
+  expansion_factor: 16
+  l1_coeff: 0.00005
+training:
+  batch_size: 4096
+  lr: 0.0003
+  num_tokens: 100_000_000
