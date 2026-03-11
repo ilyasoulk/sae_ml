@@ -45,6 +45,16 @@ class CodeSwitchConfig(BaseModel):
     batch_size: int = 32
 
 
+class AblationConfig(BaseModel):
+    dataset_path: str
+    target_languages: list[str] = ["fr", "es", "ko"]
+    max_samples_per_language: int = 500
+    batch_size: int = 16
+    # Each entry is [start_idx, topk]: which ranked features to ablate.
+    # [0, 1] = rank-#1 feature only, [1, 1] = rank-#2 only, [0, 2] = rank-#1 and #2 together.
+    feature_configs: list[list[int]] = [[0, 1], [1, 1], [0, 2]]
+
+
 class AnalyseConfig(BaseModel):
     llm_path: str
     sae_repo_id: str
@@ -53,6 +63,7 @@ class AnalyseConfig(BaseModel):
     device: str
     extract: ExtractConfig
     code_switch: CodeSwitchConfig
+    ablation: AblationConfig
 
 
 # main configuration
