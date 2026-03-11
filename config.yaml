@@ -37,3 +37,11 @@ analyse:
     or_language: "es"
     batch_size: 32
 
+  ablation:
+    dataset_path: "./data/multilingual_data_test.jsonl"
+    target_languages: ["fr", "es", "ko"]
+    max_samples_per_language: 500
+    batch_size: 16
+    # [start_idx, topk]: rank-#1, rank-#2, rank-#1+#2
+    feature_configs: [[0, 1], [1, 1], [0, 2]]
+
