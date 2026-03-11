@@ -1,6 +1,7 @@
 # sae_ml
 
 Minimal codebase for:
+
 1. Training a Sparse Autoencoder (SAE) on activations from a target LLM layer.
 2. Extracting language-specific SAE features across layers.
 3. Running a code-switch experiment and plotting activation behavior.
@@ -46,12 +47,14 @@ pip install -e .
 Edit `config.yaml`.
 
 Key training fields:
+
 - `training.llm_path`: Hugging Face model ID (example: `Qwen/Qwen2.5-1.5B`)
 - `training.dataset_path`: Hugging Face dataset ID (loaded with `datasets.load_dataset`)
 - `training.target_layer_name`: module path to hook (example: `model.layers.20`)
 - `training.device`: usually `cuda`
 
 Key analysis fields:
+
 - `analyse.llm_path`: model for analysis (example: `google/gemma-2-2b`)
 - `analyse.sae_repo_id`: Gemma Scope SAE repo (example: `google/gemma-scope-2b-pt-res`)
 - `analyse.num_layers` or `analyse.layers`: layers to process
@@ -63,7 +66,7 @@ Key analysis fields:
 `analyse.extract.dataset_path` expects JSONL records like:
 
 ```json
-{"text": "Some sentence", "lan": "en"}
+{ "text": "Some sentence", "lan": "en" }
 ```
 
 `analyse.code_switch.dataset_path` expects JSONL records like:
@@ -78,6 +81,7 @@ Key analysis fields:
 ```
 
 For training data, each dataset item must contain either:
+
 - a `text` field, or
 - both `inputs` and `targets` fields (concatenated in code).
 
@@ -92,6 +96,7 @@ uv run python -m training.train
 ```
 
 Outputs:
+
 - `checkpoints/<wandb-run-name>/sae_weights.pt`
 - `checkpoints/<wandb-run-name>/config.json`
 
@@ -102,6 +107,7 @@ uv run python -m analyse.extract_features
 ```
 
 Output:
+
 - `top_features.json`
 
 3. Run code-switch experiment:
@@ -111,9 +117,23 @@ uv run python -m analyse.code_switch
 ```
 
 Outputs (per target language):
+
 - `results/code_switch/<model_name>/<language>/data.json`
 - `results/code_switch/<model_name>/<language>/activation_plot.png`
 - `results/code_switch/<model_name>/<language>/activation_plot.pdf`
+
+4. Run ablation experiment:
+
+```bash
+uv run python -m analyse.ablation
+uv run python -m analyse.plot_ablation
+```
+
+Outputs (per target language):
+
+- `results/ablation/<model_name>/<language>/ce_change_<start_idx>_<topk>.png/pdf`
+- `results/ablation/<model_name>/<language>/ori_ce_loss.npy`
+- `results/ablation/<model_name>/<language>/sae_ce_loss_all_layers_<start_idx>_<topk>.npy`
 
 ## Notes
 
@@ -123,3 +143,7 @@ Outputs (per target language):
   - `training.optim.sae_batch_size`
   - `training.optim.max_size`
   - `analyse.extract.batch_size`
+
+```
+
+```
