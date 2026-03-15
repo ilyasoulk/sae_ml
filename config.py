@@ -5,9 +5,9 @@ from typing import Literal
 
 # training configurations
 class ModelConfig(BaseModel):
-    expansion_factor: int = Field(gt=0)
+    d_sae: int = Field(gt=0)
     l1_coeff: float = Field(gt=0, lt=10)
-    loss_type: Literal["l1", "topk"] = "l1"
+    loss_type: Literal["l1", "topk", "jumprelu"] = "l1"
 
 
 class OptimConfig(BaseModel):
@@ -22,9 +22,13 @@ class OptimConfig(BaseModel):
 
 
 class TrainingConfig(BaseModel):
+    target_layer_names: list[str] = [
+        "model.layers.2",
+        "model.layers.12",
+        "model.layers.20",
+    ]
     llm_path: str
     dataset_path: str
-    target_layer_name: str
     device: str
     model: ModelConfig
     optim: OptimConfig
@@ -40,7 +44,18 @@ class ExtractConfig(BaseModel):
 
 class CodeSwitchConfig(BaseModel):
     dataset_path: str
-    target_languages: list[str] = ["en", "es", "fr", "ja", "ko", "pt", "th", "vi", "zh", "ar"]
+    target_languages: list[str] = [
+        "en",
+        "es",
+        "fr",
+        "ja",
+        "ko",
+        "pt",
+        "th",
+        "vi",
+        "zh",
+        "ar",
+    ]
     or_language: str = "es"
     batch_size: int = 32
 

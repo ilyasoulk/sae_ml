@@ -12,9 +12,16 @@ from transformers import (
 
 from config import MainConfig
 
-from training.sae import SAE
+from training.sae import SAE, TrainableGemmaScopeSAE
 from training.loss import sae_loss
-from training.utils import SAEDataset, get_collate_fn, ActivationBuffer, HookedActivations
+from training.utils import (
+    SAEDataset,
+    get_collate_fn,
+    ActivationBuffer,
+    HookedActivations,
+    MultiHookedActivations,
+    MultiActivationBuffer,
+)
 
 torch.set_float32_matmul_precision("high")
 
@@ -26,10 +33,11 @@ if __name__ == "__main__":
         print(f"Config Validation Error: \n{e}")
         exit(1)
 
-    target_layer_name = cfg.target_layer_name
+    # target_layer_name = cfg.target_layer_name
+    target_layer_names = cfg.target_layer_names
     wandb.init(
         project="multilingual-sae-project",
-        name=f"layer-{target_layer_name}-exp-{cfg.model.expansion_factor}",
+        name=f"layer-{'_'.join(target_layer_names)}-exp-{cfg.model.d_sae}",
         config=cfg.model_dump(),
     )
 
@@ -59,18 +67,23 @@ if __name__ == "__main__":
     d_model = llm.config.hidden_size
     print(f"LLM has hidden_size = {d_model}")
     module_dict = dict(llm.named_modules())
+    target_modules = {}
+    for name in target_layer_names:
+        if name not in module_dict:
+            print(f"Available modules: {list(module_dict.keys())[:10]} ...")
+            raise ValueError(f"Module '{name}' not found in the LLM.")
+        target_modules[name] = module_dict[name]
 
-    if target_layer_name not in module_dict:
-        print(f"Available modules: {list(module_dict.keys())[:10]} ...")
-        raise ValueError(f"Module '{target_layer_name}' not found in the LLM.")
-
-    target_layer = module_dict[target_layer_name]
-    catcher = HookedActivations(target_layer)
-    sae = SAE(d_model=d_model, expansion_factor=cfg.model.expansion_factor).to(device)
-    sae = torch.compile(sae)
+    catcher = MultiHookedActivations(target_modules)
+    saes = torch.nn.ModuleDict({
+        name.replace(".", "_"): torch.compile( # type: ignore
+            TrainableGemmaScopeSAE(d_model=d_model, d_sae=cfg.model.d_sae)
+        )
+        for name in target_layer_names
+    }).to(device)
 
     optimizer = torch.optim.AdamW(
-        sae.parameters(),
+        saes.parameters(),
         lr=cfg.optim.lr,
         fused=True,
         weight_decay=cfg.optim.weight_decay,
@@ -80,7 +93,9 @@ if __name__ == "__main__":
         optimizer, num_warmup_steps=cfg.optim.num_warmup_steps
     )
 
-    buffer = ActivationBuffer(d_model, max_size=cfg.optim.max_size, device=device)
+    buffer = MultiActivationBuffer(
+        target_layer_names, d_model=d_model, max_size=cfg.optim.max_size, device=device
+    )
 
     global_step = 0
 
@@ -91,72 +106,82 @@ if __name__ == "__main__":
             attention_mask = batch["attention_mask"].to(device)
 
             with torch.no_grad():
-                _ = llm(input_ids, attention_mask=attention_mask)
+                _ = llm.model(input_ids, attention_mask=attention_mask)
 
-            activation = catcher.activation
-            if activation is not None:
-                real_acts = activation[attention_mask.bool()]
-                buffer.add(real_acts)
+            real_acts_dict = {}
+            for name in target_layer_names:
+                real_acts_dict[name] = catcher.activations[name][attention_mask.bool()]
+
+            buffer.add(real_acts_dict)
+            catcher.clear()
 
             if buffer.is_full:
-                sae.train()
-                for sae_batch in buffer.drain(batch_size=cfg.optim.sae_batch_size):
+                saes.train()
+                for sae_batch_dict in buffer.drain(batch_size=cfg.optim.sae_batch_size):
                     optimizer.zero_grad(set_to_none=True)
-                    reconstructed_acts, features = sae(sae_batch)
+                    total_loss = 0.0
+                    metrics_to_log = {}
 
-                    loss = sae_loss(
-                        sae_batch,
-                        reconstructed_acts,
-                        features,
-                        loss_type=cfg.model.loss_type,
-                        l1_coeff=cfg.model.l1_coeff,
-                    )
+                    for name in target_layer_names:
+                        safe_name = name.replace(".", "_")
+                        sae = saes[safe_name]
+                        # layer_acts = sae_batch_dict[name]
+                        layer_acts = sae_batch_dict[name].to(torch.float32)
+                        reconstructed_acts, features, mask = sae(layer_acts)
+                        layer_loss = sae_loss(
+                            layer_acts,
+                            reconstructed_acts,
+                            features,
+                            loss_type=cfg.model.loss_type,
+                            ste_mask=mask,
+                            l1_coeff=cfg.model.l1_coeff,
+                        )
+                        total_loss += layer_loss
+                        with torch.no_grad():
+                            l0 = (features > 0).float().sum(dim=-1).mean().item()
+                            mse = (
+                                (reconstructed_acts - layer_acts)
+                                .pow(2)
+                                .sum(dim=-1)
+                                .mean()
+                                .item()
+                            )
+                            variance = layer_acts.var(dim=0).sum().item()
+                            fve = 1.0 - (mse / (variance + 1e-8))
 
-                    loss.backward()
+                            metrics_to_log[f"train/{safe_name}_loss"] = (
+                                layer_loss.item()
+                            )
+                            metrics_to_log[f"train/{safe_name}_l0"] = l0
+                            metrics_to_log[f"train/{safe_name}_fve"] = fve
+
+                    total_loss.backward()
                     optimizer.step()
                     scheduler.step()
 
                     if cfg.model.loss_type == "l1":
-                        sae.normalize_decoder_weights()
+                        with torch.no_grad():
+                            for sae in saes.values():
+                                sae.normalize_decoder_weights()
 
-                    # Interpretability Metrics
-                    with torch.no_grad():
-                        # L0: Average number of active features per token
-                        l0 = (features > 0).float().sum(dim=-1).mean().item()
-                        # FVE: Fraction of Variance Explained
-                        mse = (
-                            (reconstructed_acts - sae_batch)
-                            .pow(2)
-                            .sum(dim=-1)
-                            .mean()
-                            .item()
-                        )
-                        variance = sae_batch.var(dim=0).sum().item()
-                        fve = 1.0 - (mse / (variance + 1e-8))
-                    wandb.log(
-                        {
-                            "train/loss": loss.item(),
-                            "train/l0_sparsity": l0,
-                            "train/fve": fve,
-                            "train/mse": mse,
-                            "train/lr": scheduler.get_last_lr()[0],
-                            "epoch": epoch,
-                        },
-                        step=global_step,
-                    )
+                    metrics_to_log["train/lr"] = scheduler.get_last_lr()[0]
+                    wandb.log(metrics_to_log, step=global_step)
 
                     global_step += 1
+                    avg_l0 = sum(metrics_to_log[f"train/{name.replace('.', '_')}_l0"] for name in target_layer_names) / len(target_layer_names)
+                    avg_fve = sum(metrics_to_log[f"train/{name.replace('.', '_')}_fve"] for name in target_layer_names) / len(target_layer_names)
+                    
                     pbar.set_postfix({
-                        "Loss": f"{loss.item():.4f}",
-                        "L0": f"{l0:.1f}",
-                        "FVE": f"{fve:.3f}",
+                        "Loss": f"{total_loss.item():.2f}",
+                        "Avg_L0": f"{avg_l0:.1f}",
+                        "Avg_FVE": f"{avg_fve:.3f}"
                     })
+
     save_dir = Path("checkpoints") / str(wandb.run.name)
     save_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(sae.state_dict(), save_dir / "sae_weights.pt")
+    torch.save(saes.state_dict(), save_dir / "sae_weights.pt")
     with open(save_dir / "config.json", "w") as f:
         f.write(cfg.model_dump_json(indent=4))
 
     print(f"Model and config saved to {save_dir}")
     wandb.finish()
-
