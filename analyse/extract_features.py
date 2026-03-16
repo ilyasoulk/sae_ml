@@ -59,7 +59,7 @@ def extract_features():
 
     for layer in layers_to_process:
         print(
-            f"\nExtracting features for Layer {layer} using {cfg.extract.sae_type}..."
+            f"\nExtracting features for Layer {layer} using {cfg.sae_type}..."
         )
 
         layer_name = f"model.layers.{layer}"

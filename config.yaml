@@ -30,7 +30,7 @@ analyse:
   num_layers: 26
   layers: [20]
   device: "cuda"
-  sae_type: "custom" # "gemma_scope" or "custom"
+  sae_type: "gemma_scope" # "gemma_scope" or "custom"
   # For Gemma Scope:
   sae_repo_id: "google/gemma-scope-2b-pt-res"
   # For Custom SAE:
