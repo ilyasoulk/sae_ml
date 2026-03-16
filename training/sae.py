@@ -9,14 +9,13 @@ class SAE(nn.Module):
     https://transformer-circuits.pub/2023/monosemantic-features
     """
 
-    def __init__(self, d_model: int, expansion_factor: int) -> None:
+    def __init__(self, d_model: int, d_sae : int) -> None:
         super().__init__()
         self.d_model = d_model
-        self.expansion_factor = expansion_factor
-        up_dim = self.expansion_factor * self.d_model
+        self.d_sae = d_sae
 
-        self.enc = nn.Linear(self.d_model, up_dim)
-        self.dec = nn.Linear(up_dim, self.d_model)
+        self.enc = nn.Linear(self.d_model, self.d_sae)
+        self.dec = nn.Linear(self.d_sae, self.d_model)
 
         nn.init.zeros_(self.enc.bias)
 
@@ -31,13 +30,46 @@ class SAE(nn.Module):
         with torch.no_grad():
             self.dec.weight.data = F.normalize(self.dec.weight.data, p=2, dim=0)
 
+
+    def encode(self, x):
+        x_cent = x - self.dec.bias
+        features = F.relu(self.enc(x_cent))
+        return features
+
     def forward(self, x):
         x_cent = x - self.dec.bias
         features = F.relu(self.enc(x_cent))
         x_dec = self.dec(features)
 
         return x_dec, features, None # to match jumprelu implem
+    
 
+
+    @classmethod
+    def from_pretrained(cls, checkpoint_path: str, layer_name: str, d_model: int, d_sae: int, device: str = "cuda"):
+        master_state_dict = torch.load(checkpoint_path, map_location="cpu")
+        
+        layer_prefix = layer_name.replace(".", "_") + "."
+        
+        layer_state_dict = {}
+        for key, tensor in master_state_dict.items():
+            if key.startswith(layer_prefix):
+                # 1. Strip the layer prefix (e.g., "model_layers_12.")
+                clean_key = key[len(layer_prefix):]
+                
+                # 2. THE FIX: Strip the torch.compile prefix if it exists
+                if clean_key.startswith("_orig_mod."):
+                    clean_key = clean_key[len("_orig_mod."):]
+                    
+                layer_state_dict[clean_key] = tensor
+                
+        if not layer_state_dict:
+            raise ValueError(f"No weights found for {layer_name} in {checkpoint_path}")
+            
+        sae = cls(d_model=d_model, d_sae=d_sae)
+        sae.load_state_dict(layer_state_dict, strict=True)
+        
+        return sae.to(device)
 
 class TrainableGemmaScopeSAE(nn.Module):
     def __init__(self, d_model: int, d_sae: int):

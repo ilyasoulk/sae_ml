@@ -1,6 +1,8 @@
 import torch
 import wandb
+import numpy as np
 from tqdm import tqdm
+from huggingface_hub import HfApi
 from pathlib import Path
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -21,6 +23,7 @@ from training.utils import (
     HookedActivations,
     MultiHookedActivations,
     MultiActivationBuffer,
+    export_saes_to_huggingface
 )
 
 torch.set_float32_matmul_precision("high")
@@ -77,7 +80,7 @@ if __name__ == "__main__":
     catcher = MultiHookedActivations(target_modules)
     saes = torch.nn.ModuleDict({
         name.replace(".", "_"): torch.compile( # type: ignore
-            TrainableGemmaScopeSAE(d_model=d_model, d_sae=cfg.model.d_sae)
+            SAE(d_model=d_model, d_sae=cfg.model.d_sae)
         )
         for name in target_layer_names
     }).to(device)
@@ -122,8 +125,9 @@ if __name__ == "__main__":
                     total_loss = 0.0
                     metrics_to_log = {}
 
-                    for name in target_layer_names:
+                    for i, name in enumerate(target_layer_names):
                         safe_name = name.replace(".", "_")
+                        l1_coeff = cfg.model.l1_coeff[i]
                         sae = saes[safe_name]
                         # layer_acts = sae_batch_dict[name]
                         layer_acts = sae_batch_dict[name].to(torch.float32)
@@ -134,7 +138,7 @@ if __name__ == "__main__":
                             features,
                             loss_type=cfg.model.loss_type,
                             ste_mask=mask,
-                            l1_coeff=cfg.model.l1_coeff,
+                            l1_coeff=l1_coeff,
                         )
                         total_loss += layer_loss
                         with torch.no_grad():
@@ -183,5 +187,13 @@ if __name__ == "__main__":
     with open(save_dir / "config.json", "w") as f:
         f.write(cfg.model_dump_json(indent=4))
 
+    # if cfg.repo_id:
+    #     export_saes_to_huggingface(
+    #         saes=saes,
+    #         target_layer_names=target_layer_names,
+    #         d_sae=cfg.model.d_sae,
+    #         metrics=metrics_to_log, # Pass the last batch's metrics dict
+    #         repo_id=cfg.repo_id
+    #     )
     print(f"Model and config saved to {save_dir}")
     wandb.finish()

@@ -6,7 +6,7 @@ from typing import Literal
 # training configurations
 class ModelConfig(BaseModel):
     d_sae: int = Field(gt=0)
-    l1_coeff: float = Field(gt=0, lt=10)
+    l1_coeff: list[float] = [5.0]
     loss_type: Literal["l1", "topk", "jumprelu"] = "l1"
 
 
@@ -30,6 +30,7 @@ class TrainingConfig(BaseModel):
     llm_path: str
     dataset_path: str
     device: str
+    repo_id: str = None
     model: ModelConfig
     optim: OptimConfig
 
@@ -79,6 +80,14 @@ class AnalyseConfig(BaseModel):
     extract: ExtractConfig
     code_switch: CodeSwitchConfig
     ablation: AblationConfig
+    sae_type: str = "custom" # "gemma_scope" or "custom"
+    
+    # For Gemma Scope:
+    sae_repo_id: str = "google/gemma-scope-2b-pt-res"
+    
+    # For Custom SAE:
+    custom_checkpoint_path: str = "./checkpoints/your_wandb_run_name/sae_weights.pt"
+    custom_d_sae: int = 16384
 
 
 # main configuration

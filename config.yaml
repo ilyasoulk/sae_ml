@@ -7,14 +7,15 @@ training:
     "model.layers.20"
   ]
   device: "cuda"
+  repo_id: "ilyas-17/gemma-2b-multilingual-saes"
 
   model:
     d_sae: 16384
-    l1_coeff: 0.002
-    loss_type: "jumprelu"
+    l1_coeff: [5.0, 10.0, 20.0]
+    loss_type: "l1"
 
   optim:
-    llm_batch_size: 8
+    llm_batch_size: 256
     sae_batch_size: 4096
     lr: 0.0005
     weight_decay: 0.0
@@ -27,10 +28,17 @@ analyse:
   llm_path: "google/gemma-2-2b"
   sae_repo_id: "google/gemma-scope-2b-pt-res"
   num_layers: 26
+  layers: [2, 12, 20]
   device: "cuda"
+  sae_type: "custom" # "gemma_scope" or "custom"
+  # For Gemma Scope:
+  sae_repo_id: "google/gemma-scope-2b-pt-res"
+  # For Custom SAE:
+  custom_checkpoint_path: "./checkpoints/layer-model.layers.2_model.layers.12_model.layers.20-exp-16384/sae_weights.pt"
+  custom_d_sae: 16384
   
   extract:
-    dataset_path: "./data/multilingual_data.jsonl"
+    dataset_path: "./data/multilingual_data_test.jsonl"
     top_k: 5
     batch_size: 32
     max_length: 128

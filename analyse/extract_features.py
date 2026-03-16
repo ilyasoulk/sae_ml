@@ -1,17 +1,22 @@
 import json
 import torch
+import os
 from collections import defaultdict
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from config import MainConfig
 from analyse.dataset import build_language_dataloaders
 from analyse.gemma_scope import GemmaScopeSAE
-
+from training.sae import SAE # Import your custom SAE
 
 def extract_features():
     cfg = MainConfig.load("config.yaml").analyse
     device = cfg.device
-    layers_to_process = cfg.layers if cfg.layers else list(range(cfg.num_layers))
+    # Default to the 3 layers we trained if not specified
+    if cfg.layers is not None:
+        layers_to_process = cfg.layers
+    else:
+        layers_to_process = [i for i in range(cfg.num_layers)]
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.llm_path)
     if tokenizer.pad_token is None:
@@ -31,15 +36,37 @@ def extract_features():
     languages = list(dataloaders.keys())
     top_features_dict = defaultdict(dict)
 
-    for layer in layers_to_process:
-        print(f"Extracting features for Layer {layer}...")
+    d_model = model.config.hidden_size
 
-        sae = GemmaScopeSAE.from_pretrained(
-            cfg.sae_repo_id, layer_idx=layer, device=device
-        )
+    for layer in layers_to_process:
+        print(f"\nExtracting features for Layer {layer} using {cfg.sae_type}...")
+
+        # --- MODULAR SAE LOADER ---
+        layer_name = f"model.layers.{layer}"
+        
+        if cfg.sae_type == "gemma_scope":
+            sae = GemmaScopeSAE.from_pretrained(
+                cfg.sae_repo_id, layer_idx=layer, device=device
+            )
+            d_sae = sae.d_sae
+            output_filename = "top_features_gemma_scope.json"
+            
+        elif cfg.sae_type == "custom":
+            sae = SAE.from_pretrained(
+                checkpoint_path=cfg.custom_checkpoint_path,
+                layer_name=layer_name,
+                d_model=d_model,
+                d_sae=cfg.custom_d_sae,
+                device=device
+            )
+            d_sae = cfg.custom_d_sae
+            output_filename = "top_features_custom.json"
+            
+        else:
+            raise ValueError(f"Unknown sae_type in config: {cfg.sae_type}")
+            
         sae.eval()
 
-        d_sae = sae.d_sae
         sum_acts = {
             lan: torch.zeros(d_sae, device=device, dtype=torch.float32)
             for lan in languages
@@ -49,7 +76,11 @@ def extract_features():
         def hook_fn(module, input, output):
             with torch.no_grad():
                 hidden_states = output[0] if isinstance(output, tuple) else output
-                return sae.encode(hidden_states.to(torch.float32))
+                # ClassicSAE returns a tuple: (reconstructed, features). We want [1]!
+                if cfg.sae_type == "custom":
+                    return sae.encode(hidden_states.to(torch.float32))
+                else:
+                    return sae.encode(hidden_states.to(torch.float32))
 
         handle = model.model.layers[layer].register_forward_hook(
             lambda m, i, o: setattr(model, "current_sae_acts", hook_fn(m, i, o))
@@ -78,7 +109,6 @@ def extract_features():
         del sae
         torch.cuda.empty_cache()
 
-
         avg_acts_list = []
         for lan in languages:
             mu_l = sum_acts[lan] / max(token_counts[lan], 1)
@@ -86,20 +116,17 @@ def extract_features():
             
         all_avg_acts = torch.stack(avg_acts_list) # Shape: [num_languages, d_sae]
 
-
         for idx, lan in enumerate(languages):
             mu_l = all_avg_acts[idx]
             other_acts = torch.cat([all_avg_acts[:idx], all_avg_acts[idx+1:]], dim=0)
             mu_other = other_acts.mean(dim=0) 
             score = mu_l - mu_other
             
-            # Get BOTH the indices and the actual score values
             top_k_scores, top_k_indices = torch.topk(score, k=cfg.extract.top_k)
             
             indices = top_k_indices.tolist()
             scores = top_k_scores.tolist()
             
-            # Extract the raw u and v values for these specific features
             u_values = mu_l[top_k_indices].tolist()
             v_values = mu_other[top_k_indices].tolist()
             
@@ -114,14 +141,10 @@ def extract_features():
                 
             top_features_dict[f"layer_{layer}"][lan] = feature_details
 
-
-
-    with open("top_features.json", "w", encoding="utf-8") as f:
+    with open(output_filename, "w", encoding="utf-8") as f:
         json.dump(top_features_dict, f, indent=4)
 
-    print("Successfully saved top_features.json!")
-
+    print(f"Successfully saved {output_filename}!")
 
 if __name__ == "__main__":
     extract_features()
-

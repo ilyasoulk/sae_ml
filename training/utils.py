@@ -1,5 +1,8 @@
 import torch
+import numpy as np
 import torch.nn as nn
+from pathlib import Path
+from huggingface_hub import HfApi
 from torch.utils.data import Dataset
 
 
@@ -157,3 +160,63 @@ class MultiActivationBuffer:
             yield {name: self.buffers[name][batch_indices] for name in self.layer_names}
 
         self.current_size = 0
+
+
+
+import torch
+import numpy as np
+from pathlib import Path
+from huggingface_hub import HfApi
+
+def export_saes_to_huggingface(
+    saes: torch.nn.ModuleDict, 
+    target_layer_names: list[str], 
+    d_sae: int, 
+    metrics: dict, 
+    repo_id: str
+):
+    """
+    Saves trained SAEs in the Gemma Scope format and uploads them to the Hugging Face Hub.
+    """
+    print(f"\nPreparing weights for Hugging Face export to {repo_id}...")
+    
+    api = HfApi()
+    api.create_repo(repo_id=repo_id, exist_ok=True)
+
+    hf_save_dir = Path("hf_upload_staging")
+    hf_save_dir.mkdir(parents=True, exist_ok=True)
+
+    width_str = f"{d_sae // 1024}k"
+
+    for name in target_layer_names:
+        safe_name = name.replace(".", "_")
+        sae = saes[safe_name]
+        
+        layer_idx = name.split(".")[-1]
+        
+        # Grab the final L0 value from the training metrics
+        final_l0_metric = metrics.get(f"train/{safe_name}_l0", 0)
+        final_l0 = int(round(final_l0_metric))
+        
+        rel_path = f"layer_{layer_idx}/width_{width_str}/average_l0_{final_l0}"
+        local_dir = hf_save_dir / rel_path
+        local_dir.mkdir(parents=True, exist_ok=True)
+        
+        params = {
+            "W_enc": sae.W_enc.detach().cpu().to(torch.float32).numpy(),
+            "b_enc": sae.b_enc.detach().cpu().to(torch.float32).numpy(),
+            "W_dec": sae.W_dec.detach().cpu().to(torch.float32).numpy(),
+            "b_dec": sae.b_dec.detach().cpu().to(torch.float32).numpy(),
+            "threshold": sae.threshold.detach().cpu().to(torch.float32).numpy(),
+        }
+        
+        np.savez(local_dir / "params.npz", **params)
+        print(f"Saved: {rel_path}/params.npz")
+        
+    print(f"\nUploading folder structure to {repo_id} ...")
+    api.upload_folder(
+        folder_path=str(hf_save_dir),
+        repo_id=repo_id,
+        commit_message=f"Upload JumpReLU SAEs for layers {', '.join(target_layer_names)}"
+    )
+    print("Upload complete! Models are ready for .from_pretrained() inference.")
