@@ -80,11 +80,11 @@ class AnalyseConfig(BaseModel):
     extract: ExtractConfig
     code_switch: CodeSwitchConfig
     ablation: AblationConfig
-    sae_type: str = "custom" # "gemma_scope" or "custom"
-    
+    sae_type: str = "custom"  # "gemma_scope" or "custom"
+
     # For Gemma Scope:
     sae_repo_id: str = "google/gemma-scope-2b-pt-res"
-    
+
     # For Custom SAE:
     custom_checkpoint_path: str = "./checkpoints/your_wandb_run_name/sae_weights.pt"
     custom_d_sae: int = 16384
