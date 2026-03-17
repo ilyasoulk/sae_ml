@@ -45,18 +45,12 @@ class ExtractConfig(BaseModel):
 
 class CodeSwitchConfig(BaseModel):
     dataset_path: str
+    balanced_dataset_path: str = "data/v2_balanced_code_switch.jsonl"
     target_languages: list[str] = [
-        "en",
-        "es",
-        "fr",
-        "ja",
-        "ko",
-        "pt",
-        "th",
-        "vi",
-        "zh",
-        "ar",
+        "en", "es", "fr", "ja", "ko", "pt", "th", "vi", "zh", "ar",
     ]
+    source_languages: list[str] = ["en", "es", "fr", "ja", "ko", "pt", "th", "vi", "zh", "ar"]
+    
     or_language: str = "es"
     batch_size: int = 32
 
