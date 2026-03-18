@@ -62,6 +62,7 @@ class CodeSwitchConfig(BaseModel):
 
 
 class AblationConfig(BaseModel):
+    top_features_file: str
     dataset_path: str
     target_languages: list[str] = ["fr", "es", "ko"]
     max_samples_per_language: int = 500

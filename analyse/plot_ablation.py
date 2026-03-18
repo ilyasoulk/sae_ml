@@ -1,19 +1,5 @@
 """
 Plotting utilities for the feature ablation analysis.
-
-Two chart types are produced:
-
-1. `plot_single_language_ablation`
-   One figure per (language, feature_config): a line chart showing the mean
-   change in CE loss (ablated - baseline) for the target language corpus vs.
-   all other language corpora, across all layers.
-
-2. `plot_all_languages_grid`
-   A 3x3 subplot grid (one cell per non-English language) that overlays the
-   three feature_config variants (rank-#1, rank-#2, rank-#1+#2) so the reader
-   can compare how many features need to be ablated to affect each language.
-
-Both functions read the .npy files produced by `analyse/ablation.py`.
 """
 
 import json
@@ -39,6 +25,16 @@ LANGUAGE_DISPLAY_NAMES: dict[str, str] = {
     "vi": "Vietnamese",
     "zh": "Chinese",
     "ar": "Arabic",
+    "arb": "Arabic",
+    "vie": "Vietnamese",
+    "sin": "Sinhala",
+    "tel": "Telugu",
+    "zsm": "Chinese",
+    "som": "Somali",
+    "tam": "Tamil",
+    "yor": "Yoruba",
+    "pan": "Panjabi",
+    "guj": "Gujarati",
 }
 
 PLOT_STYLE: dict = {
@@ -341,6 +337,135 @@ def _rebuild_language_slice(
 
 
 # ---------------------------------------------------------------------------
+# Single-layer bar chart (used when only one layer was ablated)
+# ---------------------------------------------------------------------------
+
+
+def plot_single_layer_bar(
+    model_name: str,
+    target_language: str,
+    feature_configs: list[list[int]],
+    all_languages: list[str],
+    max_samples_per_language: int,
+    layer_idx: int = 0,
+) -> None:
+    """
+    This is the right visualisation when only one layer was run (e.g. layer 20),
+    because the line-chart functions collapse to a single point in that case.
+
+    Saved to:
+        results/ablation/{model_name}/{target_language}/ce_change_bar.png / .pdf
+    """
+    results_dir = f"results/ablation/{model_name}/{target_language}"
+    baseline_path = os.path.join(results_dir, "ori_ce_loss.npy")
+    if not os.path.exists(baseline_path):
+        print(f"  [skip] baseline not found for {target_language}")
+        return
+
+    baseline_ce_loss = np.load(baseline_path)
+    language_slice = _rebuild_language_slice(
+        all_languages, max_samples_per_language, len(baseline_ce_loss)
+    )
+
+    # Only keep languages that actually have samples in the npy slice
+    present_languages = [
+        l for l in all_languages if language_slice[l].stop > language_slice[l].start
+    ]
+
+    n_langs = len(present_languages)
+    n_configs = len(feature_configs)
+    bar_width = 0.8 / n_configs
+    x = np.arange(n_langs)
+
+    target_display = LANGUAGE_DISPLAY_NAMES.get(
+        target_language, target_language.upper()
+    )
+
+    with plt.rc_context(PLOT_STYLE):
+        fig, ax = plt.subplots(figsize=(max(10, n_langs * 0.9), 5))
+
+        for config_idx, (start_idx, topk) in enumerate(feature_configs):
+            ablated_path = os.path.join(
+                results_dir, f"sae_ce_loss_all_layers_{start_idx}_{topk}.npy"
+            )
+            if not os.path.exists(ablated_path):
+                print(f"  [skip] {ablated_path} not found.")
+                continue
+
+            ablated_ce_loss = np.load(ablated_path)  # (n_layers, n_total_texts)
+            # Pick the requested layer index (row) from the stacked array
+            ablated_row = ablated_ce_loss[layer_idx]  # (n_total_texts,)
+            ce_change = ablated_row - baseline_ce_loss  # (n_total_texts,)
+
+            per_lang_delta = np.array(
+                [ce_change[language_slice[l]].mean() for l in present_languages]
+            )
+
+            rank_label = (
+                f"Rank #{start_idx + 1}"
+                if topk == 1
+                else f"Ranks #{start_idx + 1}–#{start_idx + topk}"
+            )
+
+            # Colour: target language bars are solid, others use the config colour
+            bar_colours = [
+                (
+                    "tab:blue"
+                    if l == target_language
+                    else FEATURE_CONFIG_COLOURS[
+                        config_idx % len(FEATURE_CONFIG_COLOURS)
+                    ]
+                )
+                for l in present_languages
+            ]
+
+            offset = (config_idx - (n_configs - 1) / 2) * bar_width
+            bars = ax.bar(
+                x + offset,
+                per_lang_delta,
+                width=bar_width,
+                color=bar_colours,
+                label=rank_label,
+                edgecolor="white",
+                linewidth=0.4,
+            )
+
+        # X-axis labels
+        display_labels = [
+            LANGUAGE_DISPLAY_NAMES.get(l, l.upper()) for l in present_languages
+        ]
+        ax.set_xticks(x)
+        ax.set_xticklabels(display_labels, rotation=35, ha="right", fontsize=11)
+
+        # Highlight the target language tick label
+        tick_labels = ax.get_xticklabels()
+        target_pos = (
+            present_languages.index(target_language)
+            if target_language in present_languages
+            else -1
+        )
+        if target_pos >= 0:
+            tick_labels[target_pos].set_color("tab:blue")
+            tick_labels[target_pos].set_fontweight("bold")
+
+        ax.axhline(0, color="black", linewidth=0.8)
+        ax.set_ylabel("ΔCE Loss (ablated - baseline)")
+        ax.set_title(f"Ablation of {target_display} Features at Layer 20")
+        ax.grid(axis="y", linestyle="--", alpha=0.4)
+        ax.legend(loc="upper right", frameon=False)
+
+        plt.tight_layout()
+        stem = "ce_change_bar"
+        fig.savefig(os.path.join(results_dir, f"{stem}.pdf"), bbox_inches="tight")
+        fig.savefig(
+            os.path.join(results_dir, f"{stem}.png"), bbox_inches="tight", dpi=150
+        )
+        plt.close(fig)
+
+    print(f"  Saved: {results_dir}/{stem}.png")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -354,8 +479,6 @@ def plot_ablation_results() -> None:
     model_name = cfg.llm_path.split("/")[-1]
     layers = cfg.layers if cfg.layers else list(range(cfg.num_layers))
 
-    # Determine the full language order as it was written to the .npy files.
-    # Language ordering is always sorted(samples_by_language.keys()), matching the JSONL.
     with open(ablation_cfg.dataset_path, "r", encoding="utf-8") as f:
         language_set: set[str] = set()
         for line in f:
@@ -367,25 +490,35 @@ def plot_ablation_results() -> None:
             f"\nPlotting ablation results for {LANGUAGE_DISPLAY_NAMES.get(target_language, target_language)}..."
         )
 
-        for start_idx, topk in ablation_cfg.feature_configs:
-            plot_single_language_ablation(
+        if len(layers) == 1:
+            plot_single_layer_bar(
                 model_name=model_name,
                 target_language=target_language,
-                start_idx=start_idx,
-                topk=topk,
+                feature_configs=ablation_cfg.feature_configs,
+                all_languages=all_languages,
+                max_samples_per_language=ablation_cfg.max_samples_per_language,
+                layer_idx=0,
+            )
+        else:
+            for start_idx, topk in ablation_cfg.feature_configs:
+                plot_single_language_ablation(
+                    model_name=model_name,
+                    target_language=target_language,
+                    start_idx=start_idx,
+                    topk=topk,
+                    all_languages=all_languages,
+                    max_samples_per_language=ablation_cfg.max_samples_per_language,
+                    layers=layers,
+                )
+
+            plot_all_languages_grid(
+                model_name=model_name,
+                target_language=target_language,
+                feature_configs=ablation_cfg.feature_configs,
                 all_languages=all_languages,
                 max_samples_per_language=ablation_cfg.max_samples_per_language,
                 layers=layers,
             )
-
-        plot_all_languages_grid(
-            model_name=model_name,
-            target_language=target_language,
-            feature_configs=ablation_cfg.feature_configs,
-            all_languages=all_languages,
-            max_samples_per_language=ablation_cfg.max_samples_per_language,
-            layers=layers,
-        )
 
     print("\nAll ablation plots saved.")
 
