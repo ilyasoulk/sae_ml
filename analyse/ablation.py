@@ -27,25 +27,7 @@ from transformers import (
 
 from analyse.gemma_scope import GemmaScopeSAE
 from config import AblationConfig, MainConfig
-
-
-LANGUAGE_DISPLAY_NAMES: dict[str, str] = {
-    "en": "English",
-    "es": "Spanish",
-    "fr": "French",
-    "ja": "Japanese",
-    "ko": "Korean",
-    "pt": "Portuguese",
-    "th": "Thai",
-    "vi": "Vietnamese",
-    "zh": "Chinese",
-    "ar": "Arabic",
-}
-
-
-# ---------------------------------------------------------------------------
-# Data loading helpers
-# ---------------------------------------------------------------------------
+from analyse.plot_ablation import LANGUAGE_DISPLAY_NAMES
 
 
 def load_multilingual_samples(
@@ -196,8 +178,6 @@ def build_ablation_hook(sae: GemmaScopeSAE, feature_indices: list[int]):
 
 def run_ablation_experiment() -> None:
     """
-    Entry point for the feature ablation analysis.
-
     For every target language and every (start_idx, topk) feature configuration,
     runs the model layer-by-layer with the corresponding features ablated and
     saves per-sample CE loss arrays as .npy files.
@@ -213,7 +193,7 @@ def run_ablation_experiment() -> None:
     layers_to_process = cfg.layers if cfg.layers else list(range(cfg.num_layers))
     model_name = cfg.llm_path.split("/")[-1]
 
-    with open("top_features.json", "r", encoding="utf-8") as f:
+    with open(ablation_cfg.top_features_file, "r", encoding="utf-8") as f:
         top_features: dict = json.load(f)
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.llm_path)

@@ -49,8 +49,9 @@ analyse:
     batch_size: 16
 
   ablation:
-    dataset_path: "./data/multilingual_data_test.jsonl"
-    target_languages: ["fr", "es", "ko"]
+    dataset_path: "./data/multilingual_rare.jsonl"
+    top_features_file: "top_features_gemma_scope.json"
+    target_languages: ['pan', 'guj', 'arb', 'vie', 'sin', 'tel', 'zsm', 'som', 'tam', 'yor']
     max_samples_per_language: 500
     batch_size: 16
     feature_configs: [[0, 1], [1, 1], [0, 2]]
