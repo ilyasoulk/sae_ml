@@ -7,7 +7,7 @@ For each target language and each model layer, this module:
   3. Computes the change in cross-entropy (CE) loss across the full multilingual test corpus.
 
 A spike in CE loss that is specific to the target language corpus confirms that the
-ablated features are *causally* responsible for processing that language at that layer.
+ablated features are responsible for processing that language at that layer.
 """
 
 import json
@@ -53,11 +53,6 @@ def load_multilingual_samples(
     return samples_by_language
 
 
-# ---------------------------------------------------------------------------
-# Batched CE loss computation
-# ---------------------------------------------------------------------------
-
-
 def compute_batched_ce_loss(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
@@ -68,11 +63,7 @@ def compute_batched_ce_loss(
 ) -> np.ndarray:
     """
     Compute per-sample cross-entropy loss for a list of texts using batched
-    inference with padding.  This is significantly faster than the single-sample
-    loop used in the reference implementation.
-
-    Returns a 1-D numpy array of shape (len(texts),) with the mean token-level
-    NLL for each sample (padding tokens are excluded from the mean).
+    inference with padding.
     """
     per_sample_losses: list[float] = []
 
@@ -116,36 +107,14 @@ def compute_batched_ce_loss(
     return np.array(per_sample_losses, dtype=np.float32)
 
 
-# ---------------------------------------------------------------------------
-# Ablation hook
-# ---------------------------------------------------------------------------
-
-
 def build_ablation_hook(sae: GemmaScopeSAE, feature_indices: list[int]):
     """
-    Build a PyTorch forward hook that removes the contribution of the specified
-    SAE feature directions from the residual stream.
-
-    For each feature f with decoder direction d_f (shape: d_model):
-        coefficient_f = hidden_state · d_f
-        hidden_state  = hidden_state - coefficient_f * d_f / ||d_f||²
-
-    When multiple features are ablated together the projection matrix is
-    precomputed once to avoid per-token recomputation during inference.
-
-    The returned hook is compatible with `register_forward_hook` on a
-    transformer layer module.
+    Build a PyTorch forward hook that removes the contribution of the specified SAE feature directions from the residual stream.
     """
-    # decoder_directions: (n_features, d_model)
     decoder_directions = sae.W_dec[feature_indices].to(torch.float32)
 
-    # Precompute the projection matrix P such that ablated = x - x @ P.T
-    # P[i] = d_i / ||d_i||²  so that x · d_i * (d_i / ||d_i||²) is correct.
-    norms_squared = (decoder_directions**2).sum(dim=1, keepdim=True)  # (n_features, 1)
-    normalised_directions = decoder_directions / norms_squared  # (n_features, d_model)
-
-    # projection_matrix: (d_model, d_model) — combines all feature projections
-    # ablated_x = x - x @ decoder_directions.T @ normalised_directions
+    norms_squared = (decoder_directions**2).sum(dim=1, keepdim=True)
+    normalised_directions = decoder_directions / norms_squared
     projection_matrix = (
         decoder_directions.T @ normalised_directions
     )  # (d_model, d_model)
@@ -169,11 +138,6 @@ def build_ablation_hook(sae: GemmaScopeSAE, feature_indices: list[int]):
         return ablated
 
     return ablation_hook
-
-
-# ---------------------------------------------------------------------------
-# Main experiment loop
-# ---------------------------------------------------------------------------
 
 
 def run_ablation_experiment() -> None:
@@ -212,9 +176,6 @@ def run_ablation_experiment() -> None:
     )
     all_languages = sorted(samples_by_language.keys())
 
-    # Flatten all texts in a consistent language order for bulk operations.
-    # We keep track of per-language slice boundaries so we can index into the
-    # flat CE loss array without carrying extra bookkeeping downstream.
     ordered_texts: list[str] = []
     language_slice: dict[str, slice] = {}
     cursor = 0
@@ -232,7 +193,7 @@ def run_ablation_experiment() -> None:
         save_dir = f"results/ablation/{model_name}/{target_language}"
         os.makedirs(save_dir, exist_ok=True)
 
-        # --- Baseline CE loss (no hooks) ---
+        # Baseline CE loss (no hooks)
         baseline_path = os.path.join(save_dir, "ori_ce_loss.npy")
         if os.path.exists(baseline_path):
             print("  Baseline CE loss already computed, loading from disk.")
@@ -245,7 +206,7 @@ def run_ablation_experiment() -> None:
             np.save(baseline_path, baseline_ce_loss)
             print(f"  Saved baseline CE loss -> {baseline_path}")
 
-        # --- Ablation per (start_idx, topk) configuration ---
+        # Ablation per (start_idx, topk) configuration
         for start_idx, topk in ablation_cfg.feature_configs:
             output_filename = f"sae_ce_loss_all_layers_{start_idx}_{topk}.npy"
             output_path = os.path.join(save_dir, output_filename)

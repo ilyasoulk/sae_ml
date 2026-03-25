@@ -49,11 +49,6 @@ FEATURE_CONFIG_COLOURS = ["tab:red", "tab:green", "tab:orange"]
 FEATURE_CONFIG_MARKERS = ["o", "s", "^"]
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
 def _mean_ce_change_per_layer(
     ablated_ce_loss: np.ndarray,  # (n_layers, n_total_texts)
     baseline_ce_loss: np.ndarray,  # (n_total_texts,)
@@ -80,11 +75,6 @@ def _complementary_slice(
     all_indices = np.arange(total)
     target_indices = all_indices[target_slice]
     return np.setdiff1d(all_indices, target_indices)
-
-
-# ---------------------------------------------------------------------------
-# Public plot functions
-# ---------------------------------------------------------------------------
 
 
 def plot_single_language_ablation(
@@ -189,11 +179,7 @@ def plot_all_languages_grid(
     non_english_languages: list[str] | None = None,
 ) -> None:
     """
-    3x3 subplot grid: one panel per non-English language, each panel overlaying
-    the CE loss change curves for each feature_config variant.
-
-    This lets the reader compare how many features must be ablated to disrupt
-    processing of each language in the corpus.
+    3x3 subplot grid: one panel per non-English language, each panel overlaying the CE loss change curves for each feature_config variant.
 
     Saved to:
         results/ablation/{model_name}/{target_language}/ce_change_grid.png / .pdf
@@ -272,11 +258,9 @@ def plot_all_languages_grid(
             ax.set_ylim(bottom=-0.5)
             ax.grid(True, linestyle="--", alpha=0.5)
 
-        # Label y-axis only for leftmost panels
         for row in range(n_rows):
             axes_flat[row * n_cols].set_ylabel("Change in CE Loss")
 
-        # Hide any unused panels
         for ax in axes_flat[n_panels:]:
             ax.set_visible(False)
 
@@ -310,11 +294,6 @@ def plot_all_languages_grid(
     print(f"  Saved: {results_dir}/{stem}.png")
 
 
-# ---------------------------------------------------------------------------
-# Slice reconstruction helper (mirrors ablation.py ordering)
-# ---------------------------------------------------------------------------
-
-
 def _rebuild_language_slice(
     all_languages: list[str],
     max_samples_per_language: int,
@@ -334,11 +313,6 @@ def _rebuild_language_slice(
         if cursor >= total_texts:
             break
     return language_slice
-
-
-# ---------------------------------------------------------------------------
-# Single-layer bar chart (used when only one layer was ablated)
-# ---------------------------------------------------------------------------
 
 
 def plot_single_layer_bar(
@@ -367,7 +341,6 @@ def plot_single_layer_bar(
         all_languages, max_samples_per_language, len(baseline_ce_loss)
     )
 
-    # Only keep languages that actually have samples in the npy slice
     present_languages = [
         l for l in all_languages if language_slice[l].stop > language_slice[l].start
     ]
@@ -393,7 +366,6 @@ def plot_single_layer_bar(
                 continue
 
             ablated_ce_loss = np.load(ablated_path)  # (n_layers, n_total_texts)
-            # Pick the requested layer index (row) from the stacked array
             ablated_row = ablated_ce_loss[layer_idx]  # (n_total_texts,)
             ce_change = ablated_row - baseline_ce_loss  # (n_total_texts,)
 
@@ -407,7 +379,6 @@ def plot_single_layer_bar(
                 else f"Ranks #{start_idx + 1}–#{start_idx + topk}"
             )
 
-            # Colour: target language bars are solid, others use the config colour
             bar_colours = [
                 (
                     "tab:blue"
@@ -430,14 +401,12 @@ def plot_single_layer_bar(
                 linewidth=0.4,
             )
 
-        # X-axis labels
         display_labels = [
             LANGUAGE_DISPLAY_NAMES.get(l, l.upper()) for l in present_languages
         ]
         ax.set_xticks(x)
         ax.set_xticklabels(display_labels, rotation=35, ha="right", fontsize=11)
 
-        # Highlight the target language tick label
         tick_labels = ax.get_xticklabels()
         target_pos = (
             present_languages.index(target_language)
@@ -463,11 +432,6 @@ def plot_single_layer_bar(
         plt.close(fig)
 
     print(f"  Saved: {results_dir}/{stem}.png")
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 
 def plot_ablation_results() -> None:
