@@ -118,10 +118,10 @@ def code_switch_experiment():
 
             handle.remove()
             
-        # --- THE CLEANING PARTY ---
+        # nettoie vram
         del sae
-        gc.collect() # Clean System RAM
-        torch.cuda.empty_cache() # Clean GPU VRAM
+        gc.collect() # system ram
+        torch.cuda.empty_cache() 
 
     # 3. Plotting
     model_name = cfg.llm_path.split("/")[-1]
